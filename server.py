@@ -9,7 +9,7 @@ from PIL import Image
 import io
 import socket
 import struct
-
+import numpy
 def conv_block(in_channels, out_channels, pool=False):
     layers = [
         nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
@@ -78,21 +78,22 @@ model = ResNet(1, len(class_labels))
 model.load_state_dict(model_state)
 
 hostname = socket.gethostname()
+local_ip = "192.168.1.200"
 server_socket = socket.socket()
 port = 8000
-server_socket.bind((hostname, port))
+server_socket.bind((local_ip, port))
 server_socket.listen(0)
-print("Waiting for connection from client")
+print("Waiting for connection from client, ip is {}".format(local_ip))
 connection = server_socket.accept()[0]
 print("Connected")
 connectionf = connection.makefile('rb')
 try:
     while True:
-        image_len = struct.unpack('<L', connection.read(struct.calcsize('<L')))[0]
+        image_len = struct.unpack('<L', connectionf.read(struct.calcsize('<L')))[0]
         if not image_len:
             break
         image_stream = io.BytesIO()
-        image_stream.write(connection.read(image_len))
+        image_stream.write(connectionf.read(image_len))
         image_stream.seek(0)
         image = Image.open(image_stream)
         print("Client's img received")
@@ -101,8 +102,8 @@ try:
         faces = face_classifier.detectMultiScale(image, 1.3, 5)
         results = []
         for (x, y, w, h) in faces:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
-            roi_gray = gray[y : y + h, x : x + w]
+            # cv2.rectangle(image, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            roi_gray = image[y : y + h, x : x + w]
             roi_gray = cv2.resize(roi_gray, (48, 48), interpolation=cv2.INTER_AREA)
 
             if np.sum([roi_gray]) != 0:
@@ -119,9 +120,12 @@ try:
             if len(results) > 5:
                 results = results[:5]
             msg = " ".join([str(label)+","+str(coordinate[0])+","+str(coordinate[1])+","+str(coordinate[2])+","+str(coordinate[3]) for label, coordinate in results])
-            connection.sendall(msg.encode)
+            connection.sendall(msg.encode())
         else:
             msg = "N/A"
             connection.sendall(msg.encode())
-        connection.flush()
         print("Responded")
+finally:
+    connectionf.close()
+    connection.close()
+    server_socket.close()
